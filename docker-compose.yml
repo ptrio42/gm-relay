@@ -4,8 +4,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    env_file:
-      - .env
     volumes:
       - "./db:/app/db"
     ports:
