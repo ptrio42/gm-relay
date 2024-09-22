@@ -1,0 +1,12 @@
+services:
+  relay:
+    container_name: gm-relay
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - "./db:/app/db"
+    ports:
+      - "3336:3336"
