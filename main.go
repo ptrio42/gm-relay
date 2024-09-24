@@ -113,10 +113,9 @@ func hasETag(event *nostr.Event) bool {
 }
 
 func handleNewGMBotRequest(db sqlite3.SQLite3Backend, relays []string) {
-	//for _, url := range relays {
 	ctx := context.Background()
 
-	relay, err := nostr.RelayConnect(ctx, relays[0])
+	relay, err := nostr.RelayConnect(ctx, relays[4])
 	if err != nil {
 		panic(err)
 	}
@@ -138,16 +137,15 @@ func handleNewGMBotRequest(db sqlite3.SQLite3Backend, relays []string) {
 	for ev := range sub.Events {
 		fmt.Println("New stats request")
 		match, _ := regexp.MatchString(`(?mi)\bstats\b`, ev.Content)
-		match1, _ := regexp.MatchString(`(?mi)\btotal\b`, ev.Content)
+		//match1, _ := regexp.MatchString(`(?mi)\btotal\b`, ev.Content)
 
 		if match && !alreadyReplied(ev.ID, pubkey) {
 			publishStats(db, ev)
-		} else if match1 && !alreadyReplied(ev.ID, pubkey) {
-
 		}
+		//} else if match1 && !alreadyReplied(ev.ID, pubkey) {
+		//
+		//}
 	}
-
-	//}
 }
 
 func getStats(db sqlite3.SQLite3Backend, pubkey string) string {
@@ -168,20 +166,22 @@ func getStats(db sqlite3.SQLite3Backend, pubkey string) string {
 	}
 
 	var oldestGm *nostr.Event
+	var firstGmDate string
 	gmCount := 0
 	for ev := range eventCh {
 		oldestGm = ev
 		gmCount += 1
 	}
 	if gmCount == 0 {
-		return "No GMs found! If you want your GMs to be stored, add wss://gm.swarmstr.com to your relay list."
+		return "No GMs found!\nIf you want your GMs to be stored,\nadd wss://gm.swarmstr.com to your relay list."
 	}
 	var gmDays int
 	if oldestGm != nil {
 		gmDays = daysBetweenDates(time.Now(), oldestGm.CreatedAt.Time())
+		firstGmDate = oldestGm.CreatedAt.Time().Format("2006-01-02")
 	}
 
-	result := fmt.Sprintf("%v GMs in last %v days", gmCount, gmDays)
+	result := fmt.Sprintf("%v GMs in last %v days.\nFirst GM recorded on %v\n\nView all notes at https://nostrrr.com/relay/gm.swarmstr.com", gmCount, gmDays, firstGmDate)
 	return result
 }
 
@@ -256,22 +256,3 @@ func alreadyReplied(ID string, pubkey string) bool {
 	}
 	return false
 }
-
-//func getGmsTotal(db sqlite3.SQLite3Backend, ctx context.Context) int64 {
-//	filter := nostr.Filter{
-//		Kinds:   []int{nostr.KindTextNote},
-//	}
-//
-//	iCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-//	defer cancel()
-//
-//	count, err := db.CountEvents(iCtx, filter)
-//	if err != nil {
-//		log.Fatalf("Failed to count events: %v", err)
-//	}
-//	return count
-//}
-//
-//func publishTotal(db sqlite3.SQLite3Backend)  {
-//
-//}
