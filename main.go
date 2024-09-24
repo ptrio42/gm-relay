@@ -42,7 +42,7 @@ func main() {
 	relay.RejectEvent = append(relay.RejectEvent, func(ctx context.Context, event *nostr.Event) (reject bool, msg string) {
 
 		match, _ := regexp.MatchString(`(?mi)\bgm\b`, event.Content)
-		cond := gmNoteNotPresentToday(db, ctx, event)
+		cond := gmNoteNotPresentToday(db, event)
 
 		if match && cond && !hasETag(event) {
 			return false, ""
@@ -76,7 +76,8 @@ func endOfTheDay(t time.Time) time.Time {
 	return time.Date(year, month, day, 23, 59, 59, 0, t.Location())
 }
 
-func gmNoteNotPresentToday(db sqlite3.SQLite3Backend, ctx context.Context, event *nostr.Event) bool {
+func gmNoteNotPresentToday(db sqlite3.SQLite3Backend, event *nostr.Event) bool {
+	ctx := context.Background()
 	t := time.Now()
 	bod := nostr.Timestamp(beginningOfTheDay(t).Unix())
 	eod := nostr.Timestamp(endOfTheDay(t).Unix())
