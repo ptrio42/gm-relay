@@ -1,6 +1,8 @@
 # GM Relay
 
-A Nostr relay that only accepts GM notes once a day.
+A Nostr relay that only accepts GM notes once a day. Comes with a bot to fetch some stats about your GMs.
+
+Built with [Khatru](https://khatru.nostr.technology) by [fiatjaf](https://github.com/fiatjaf)
 
 # Live instance
 
@@ -26,7 +28,13 @@ git clone https://github.com/ptrio42/gm-relay.git
 cd gm-relay
 ```
 
-### 2. Start the Project with Docker Compose
+### 2. Copy .env.example to .env and set bot privkey (hex)
+
+```
+cp .env.example .env
+```
+
+### 3. Start the Project with Docker Compose
 
  ```sh
  # in foreground
@@ -35,7 +43,7 @@ cd gm-relay
  docker compose up --build -d
  ```
 
-### 3. Access the relay
+### 4. Access the relay
 
 ```bash
 http://localhost:3336
