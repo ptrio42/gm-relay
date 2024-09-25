@@ -7,6 +7,7 @@ import (
 	"github.com/fiatjaf/khatru"
 	"github.com/joho/godotenv"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip19"
 	"log"
 	"net/http"
 	"os"
@@ -14,19 +15,29 @@ import (
 	"time"
 )
 
-var relays []string
-var pubkey string
+var (
+	relays = []string{
+		"wss://wot.swarmstr.com",
+		"wss://nos.lol",
+		"wss://nostr.mom",
+		"wss://nostr.wine",
+		"wss://relay.damus.io",
+		"wss://wot.utxo.one",
+	}
+	pubkey    string
+	relay     = khatru.NewRelay()
+	pool      = nostr.NewSimplePool(context.Background())
+	allGmsUrl = "https://nostrrr.com/relay/gm.swarmstr.com"
+)
 
 func main() {
-	godotenv.Load(".env")
-
-	relay := khatru.NewRelay()
 
 	relay.Info.Name = "GM Relay"
 	relay.Info.PubKey = "f1f9b0996d4ff1bf75e79e4cc8577c89eb633e68415c7faf74cf17a07bf80bd8"
 	relay.Info.Description = "A relay accepting only GM notes!"
 	relay.Info.Icon = ""
 
+	godotenv.Load(".env")
 	pubkey, _ = nostr.GetPublicKey(getEnv("GM_BOT_PRIVATE_KEY"))
 
 	db := sqlite3.SQLite3Backend{DatabaseURL: "./db/db"}
@@ -50,17 +61,9 @@ func main() {
 		return true, "Only GM notes (and not replies) are allowed (once a day)!"
 	})
 
-	relays = []string{
-		"wss://wot.swarmstr.com",
-		"wss://nos.lol",
-		"wss://nostr.mom",
-		"wss://nostr.wine",
-		"wss://relay.damus.io",
-	}
-
 	fmt.Println("running on :3336")
 
-	go handleNewGMBotRequest(db, relays)
+	go handleNewGMBotRequestMultipleRelays(db, relays, pubkey)
 
 	http.ListenAndServe(":3336", relay)
 
@@ -140,11 +143,41 @@ func handleNewGMBotRequest(db sqlite3.SQLite3Backend, relays []string) {
 		//match1, _ := regexp.MatchString(`(?mi)\btotal\b`, ev.Content)
 
 		if match && !alreadyReplied(ev.ID, pubkey) {
-			publishStats(db, ev)
+			publishEvent(ev, getStats(db, pubkey))
 		}
-		//} else if match1 && !alreadyReplied(ev.ID, pubkey) {
+		//} else if match1 && !alreadyReplied(ev.ID, ev.PubKey) {
 		//
 		//}
+	}
+
+	//}
+}
+
+func handleNewGMBotRequestMultipleRelays(db sqlite3.SQLite3Backend, relays []string, pubkey string) {
+	ctx := context.Background()
+
+	tags := make(nostr.TagMap)
+	tags["p"] = []string{pubkey}
+	filter := nostr.Filter{
+		Kinds: []int{nostr.KindTextNote},
+		Tags:  tags,
+	}
+
+	for ev := range pool.SubMany(ctx, relays, []nostr.Filter{filter}) {
+		isStatsRequest, _ := regexp.MatchString(`(?mi)\bstats\b`, ev.Content)
+		isTotalRequest, _ := regexp.MatchString(`(?mi)\btotal\b`, ev.Content)
+		itTopRequest, _ := regexp.MatchString(`(?mi)\btop\b`, ev.Content)
+
+		if isStatsRequest && !alreadyReplied(ev.ID, pubkey) {
+			fmt.Printf("Processing 'stats' request.\n")
+			publishEvent(ev.Event, getStats(db, ev.PubKey))
+		} else if isTotalRequest && !alreadyReplied(ev.ID, pubkey) {
+			fmt.Printf("Processing 'total' request.\n")
+			publishEvent(ev.Event, getGmsTotal(db))
+		} else if itTopRequest && !alreadyReplied(ev.ID, pubkey) {
+			fmt.Printf("Processing 'top' request.\n")
+			publishEvent(ev.Event, getUserWithMostGms(db))
+		}
 	}
 }
 
@@ -181,7 +214,7 @@ func getStats(db sqlite3.SQLite3Backend, pubkey string) string {
 		firstGmDate = oldestGm.CreatedAt.Time().Format("2006-01-02")
 	}
 
-	result := fmt.Sprintf("%v GMs in last %v days.\nFirst GM recorded on %v\n\nView all notes at https://nostrrr.com/relay/gm.swarmstr.com", gmCount, gmDays, firstGmDate)
+	result := fmt.Sprintf("%v GMs in last %v days.\nFirst GM recorded on %v\n\nView all notes at %v", gmCount, gmDays, firstGmDate, allGmsUrl)
 	return result
 }
 
@@ -192,12 +225,12 @@ func daysBetweenDates(startTime time.Time, endTime time.Time) int {
 	return days
 }
 
-func publishStats(db sqlite3.SQLite3Backend, ev *nostr.Event) {
+func publishEvent(ev *nostr.Event, content string) {
 	event := nostr.Event{
 		PubKey:    pubkey,
 		CreatedAt: nostr.Now(),
 		Kind:      nostr.KindTextNote,
-		Content:   getStats(db, ev.PubKey),
+		Content:   content,
 		Tags:      []nostr.Tag{[]string{"e", ev.ID}, []string{"p", ev.PubKey}},
 	}
 	event.Sign(getEnv("GM_BOT_PRIVATE_KEY"))
@@ -228,12 +261,9 @@ func getEnv(key string) string {
 
 func alreadyReplied(ID string, pubkey string) bool {
 	fmt.Println("Checking if request was already fulfilled")
+
 	ctx := context.Background()
 
-	relay, err := nostr.RelayConnect(ctx, relays[2])
-	if err != nil {
-		panic(err)
-	}
 	tags := make(nostr.TagMap)
 	tags["e"] = []string{ID}
 	filter := nostr.Filter{
@@ -242,17 +272,71 @@ func alreadyReplied(ID string, pubkey string) bool {
 		Authors: []string{pubkey},
 	}
 
-	iCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	sub, err := relay.Subscribe(iCtx, []nostr.Filter{filter})
-	if err != nil {
-		panic(err)
-	}
-
-	for range sub.Events {
+	for range pool.SubManyEose(ctx, relays, []nostr.Filter{filter}) {
 		fmt.Println("Already replied")
 		return true
 	}
 	return false
+}
+
+func getGmsTotal(db sqlite3.SQLite3Backend) string {
+	ctx := context.Background()
+	filter := nostr.Filter{
+		Kinds: []int{nostr.KindTextNote},
+	}
+
+	iCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	count, err := db.CountEvents(iCtx, filter)
+	if err != nil {
+		log.Fatalf("Failed to count events: %v", err)
+	}
+
+	result := fmt.Sprintf("%v GMs stored in total.\n\nView all notes at %v", count, allGmsUrl)
+	return result
+}
+
+func getUserWithMostGms(db sqlite3.SQLite3Backend) string {
+	ctx := context.Background()
+	filter := nostr.Filter{
+		Kinds: []int{nostr.KindTextNote},
+	}
+
+	iCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	eventCh, err := db.QueryEvents(iCtx, filter)
+	if err != nil {
+		log.Fatalf("Failed to query events: %v", err)
+	}
+
+	groupedEvents := make(map[string][]*nostr.Event)
+	for ev := range eventCh {
+		groupedEvents[ev.PubKey] = append(groupedEvents[ev.PubKey], ev)
+	}
+
+	pubkey, gmCount := findTopUser(groupedEvents)
+	npub, err := nip19.EncodePublicKey(pubkey)
+	if err != nil {
+		log.Fatalf("Failed to encode public key: %v", err)
+	}
+	bech32EncodedEntity := fmt.Sprintf("nostr:%v", npub)
+
+	result := fmt.Sprintf("Person with most GMs is %v (%v total).\n\nView all notes at %v", bech32EncodedEntity, gmCount, allGmsUrl)
+	return result
+}
+
+func findTopUser(groupedEvents map[string][]*nostr.Event) (string, int) {
+	var largestKey string
+	maxLength := 0
+
+	for key, events := range groupedEvents {
+		if len(events) > maxLength {
+			maxLength = len(events)
+			largestKey = key
+		}
+	}
+
+	return largestKey, maxLength
 }
