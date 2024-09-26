@@ -35,7 +35,7 @@ func main() {
 	relay.Info.Name = "GM Relay"
 	relay.Info.PubKey = "f1f9b0996d4ff1bf75e79e4cc8577c89eb633e68415c7faf74cf17a07bf80bd8"
 	relay.Info.Description = "A relay accepting only GM notes!"
-	relay.Info.Icon = ""
+	relay.Info.Icon = "https://image.nostr.build/939b3ec044365698b25aff993aac4c220657d54baf1a6b949fec0383800a4a9b.jpg"
 
 	godotenv.Load(".env")
 	pubkey, _ = nostr.GetPublicKey(getEnv("GM_BOT_PRIVATE_KEY"))
