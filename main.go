@@ -186,7 +186,7 @@ func handleNewGMBotRequestMultipleRelays(db sqlite3.SQLite3Backend, relays []str
 
 		case isMissedRequest && !alreadyReplied(ev.ID, pubkey):
 			fmt.Printf("Processing 'missed' request.\n")
-
+			publishEvent(ev.Event, getTodaysMissedGmNotesFromFollows(pubkey, db))
 		default:
 			// Optionally handle the case where none of the conditions match
 			fmt.Printf("No valid request to process.\n")
