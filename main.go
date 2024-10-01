@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -166,17 +168,28 @@ func handleNewGMBotRequestMultipleRelays(db sqlite3.SQLite3Backend, relays []str
 	for ev := range pool.SubMany(ctx, relays, []nostr.Filter{filter}) {
 		isStatsRequest, _ := regexp.MatchString(`(?mi)\bstats\b`, ev.Content)
 		isTotalRequest, _ := regexp.MatchString(`(?mi)\btotal\b`, ev.Content)
-		itTopRequest, _ := regexp.MatchString(`(?mi)\btop\b`, ev.Content)
+		isTopRequest, _ := regexp.MatchString(`(?mi)\btop\b`, ev.Content)
+		isMissedRequest, _ := regexp.MatchString(`(?mi)\bmissed\b`, ev.Content)
 
-		if isStatsRequest && !alreadyReplied(ev.ID, pubkey) {
+		switch {
+		case isStatsRequest && !alreadyReplied(ev.ID, pubkey):
 			fmt.Printf("Processing 'stats' request.\n")
 			publishEvent(ev.Event, getStats(db, ev.PubKey))
-		} else if isTotalRequest && !alreadyReplied(ev.ID, pubkey) {
+
+		case isTotalRequest && !alreadyReplied(ev.ID, pubkey):
 			fmt.Printf("Processing 'total' request.\n")
 			publishEvent(ev.Event, getGmsTotal(db))
-		} else if itTopRequest && !alreadyReplied(ev.ID, pubkey) {
+
+		case isTopRequest && !alreadyReplied(ev.ID, pubkey):
 			fmt.Printf("Processing 'top' request.\n")
 			publishEvent(ev.Event, getUserWithMostGms(db))
+
+		case isMissedRequest && !alreadyReplied(ev.ID, pubkey):
+			fmt.Printf("Processing 'missed' request.\n")
+
+		default:
+			// Optionally handle the case where none of the conditions match
+			fmt.Printf("No valid request to process.\n")
 		}
 	}
 }
@@ -303,7 +316,7 @@ func getUserWithMostGms(db sqlite3.SQLite3Backend) string {
 		Kinds: []int{nostr.KindTextNote},
 	}
 
-	iCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	iCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	eventCh, err := db.QueryEvents(iCtx, filter)
@@ -339,4 +352,72 @@ func findTopUser(groupedEvents map[string][]*nostr.Event) (string, int) {
 	}
 
 	return largestKey, maxLength
+}
+
+func getTodaysMissedGmNotesFromFollows(pubkey string, db sqlite3.SQLite3Backend) string {
+	follows := getUserFollows(pubkey)
+	todaysGmNotes := getAllGmsFromToday(db)
+
+	entities := []string{}
+	for _, ev := range todaysGmNotes {
+		if slices.Contains(follows, ev.PubKey) && !alreadyReplied(ev.ID, pubkey) {
+			note, err := nip19.EncodeNote(ev.ID)
+			if err != nil {
+				log.Fatalf("Failed to encode public key: %v", err)
+			}
+			entities = append(entities, fmt.Sprintf("nostr:%v", note))
+		}
+	}
+	message := fmt.Sprintf("GMs from follows you've missed today:\n\n%s", strings.Join(entities, ",\n"))
+	return message
+}
+
+func getUserFollows(pubkey string) []string {
+	filter := nostr.Filter{
+		Kinds:   []int{nostr.KindFollowList},
+		Authors: []string{pubkey},
+	}
+
+	for eventCh := range pool.SubManyEose(context.Background(), relays, []nostr.Filter{filter}) {
+		return extractTagValues(eventCh.Tags, "p")
+	}
+	return []string{}
+}
+
+func extractTagValues(tags nostr.Tags, key string) []string {
+	result := []string{}
+	for _, tag := range tags {
+		if len(tag) > 1 && tag[1] == key {
+			result = append(result, tag[1])
+		}
+	}
+	return result
+}
+
+func getAllGmsFromToday(db sqlite3.SQLite3Backend) []*nostr.Event {
+	events := []*nostr.Event{}
+
+	ctx := context.Background()
+	t := time.Now()
+	bod := nostr.Timestamp(beginningOfTheDay(t).Unix())
+	eod := nostr.Timestamp(endOfTheDay(t).Unix())
+
+	filter := nostr.Filter{
+		Kinds: []int{nostr.KindTextNote},
+		Since: &bod,
+		Until: &eod,
+	}
+
+	iCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	eventCh, err := db.QueryEvents(iCtx, filter)
+	if err != nil {
+		log.Fatalf("Failed to query events: %v", err)
+	}
+
+	for ev := range eventCh {
+		events = append(events, ev)
+	}
+	return events
 }
