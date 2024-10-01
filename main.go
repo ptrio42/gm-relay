@@ -41,6 +41,7 @@ func main() {
 
 	godotenv.Load(".env")
 	pubkey, _ = nostr.GetPublicKey(getEnv("GM_BOT_PRIVATE_KEY"))
+	fmt.Printf("Bot pubkey %v", pubkey)
 
 	db := sqlite3.SQLite3Backend{DatabaseURL: "./db/db"}
 	if err := db.Init(); err != nil {
@@ -171,25 +172,27 @@ func handleNewGMBotRequestMultipleRelays(db sqlite3.SQLite3Backend, relays []str
 		isTopRequest, _ := regexp.MatchString(`(?mi)\btop\b`, ev.Content)
 		isMissedRequest, _ := regexp.MatchString(`(?mi)\bmissed\b`, ev.Content)
 
-		switch {
-		case isStatsRequest && !alreadyReplied(ev.ID, pubkey):
-			fmt.Printf("Processing 'stats' request.\n")
-			publishEvent(ev.Event, getStats(db, ev.PubKey))
+		if !alreadyReplied(ev.ID, pubkey) {
+			switch {
+			case isStatsRequest:
+				fmt.Printf("Processing 'stats' request.\n")
+				publishEvent(ev.Event, getStats(db, ev.PubKey))
 
-		case isTotalRequest && !alreadyReplied(ev.ID, pubkey):
-			fmt.Printf("Processing 'total' request.\n")
-			publishEvent(ev.Event, getGmsTotal(db))
+			case isTotalRequest:
+				fmt.Printf("Processing 'total' request.\n")
+				publishEvent(ev.Event, getGmsTotal(db))
 
-		case isTopRequest && !alreadyReplied(ev.ID, pubkey):
-			fmt.Printf("Processing 'top' request.\n")
-			publishEvent(ev.Event, getUserWithMostGms(db))
+			case isTopRequest:
+				fmt.Printf("Processing 'top' request.\n")
+				publishEvent(ev.Event, getUserWithMostGms(db))
 
-		case isMissedRequest && !alreadyReplied(ev.ID, pubkey):
-			fmt.Printf("Processing 'missed' request.\n")
-			publishEvent(ev.Event, getTodaysMissedGmNotesFromFollows(pubkey, db))
-		default:
-			// Optionally handle the case where none of the conditions match
-			fmt.Printf("No valid request to process.\n")
+			case isMissedRequest:
+				fmt.Printf("Processing 'missed' request.\n")
+				publishEvent(ev.Event, getTodaysMissedGmNotesFromFollows(ev.PubKey, db))
+			default:
+				// Optionally handle the case where none of the conditions match
+				fmt.Printf("No valid request to process.\n")
+			}
 		}
 	}
 }
@@ -356,7 +359,9 @@ func findTopUser(groupedEvents map[string][]*nostr.Event) (string, int) {
 
 func getTodaysMissedGmNotesFromFollows(pubkey string, db sqlite3.SQLite3Backend) string {
 	follows := getUserFollows(pubkey)
+	fmt.Printf("follows: %v", follows)
 	todaysGmNotes := getAllGmsFromToday(db)
+	fmt.Printf("todaysGmNotes: %v", todaysGmNotes)
 
 	entities := []string{}
 	for _, ev := range todaysGmNotes {
@@ -379,6 +384,7 @@ func getUserFollows(pubkey string) []string {
 	}
 
 	for eventCh := range pool.SubManyEose(context.Background(), relays, []nostr.Filter{filter}) {
+		fmt.Printf("Got follows list: %v", eventCh.Tags)
 		return extractTagValues(eventCh.Tags, "p")
 	}
 	return []string{}
@@ -387,10 +393,11 @@ func getUserFollows(pubkey string) []string {
 func extractTagValues(tags nostr.Tags, key string) []string {
 	result := []string{}
 	for _, tag := range tags {
-		if len(tag) > 1 && tag[1] == key {
+		if len(tag) > 1 && tag[0] == key {
 			result = append(result, tag[1])
 		}
 	}
+	fmt.Printf("Result: %v", result)
 	return result
 }
 
