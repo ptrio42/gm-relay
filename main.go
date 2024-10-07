@@ -68,6 +68,10 @@ func main() {
 
 	go handleNewGMBotRequestMultipleRelays(db, relays, pubkey)
 
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	})
+
 	http.ListenAndServe(":3336", relay)
 
 }
